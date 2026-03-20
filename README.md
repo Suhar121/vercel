@@ -1,46 +1,24 @@
-# Developer Platform v1 (Vercel-like)
+# Developer Platform v1
 
-A simple developer platform where users can deploy React applications by uploading a ZIP file.
+A developer platform for React apps.
 
-## Features
-- **ZIP Upload**: Accept React project uploads.
-- **Automatic Detection**: Validates `package.json` and React dependency.
-- **Isolated Builds**: Builds projects inside Docker containers.
-- **Auto-Running**: Automatically runs the built app on a unique port.
-- **Real-time Logs**: View build and run logs via Server-Sent Events (SSE).
-- **Dashboard**: Web-based UI for managing deployments.
+## Setup
 
-## Prerequisites
-- Node.js (v18+)
-- Docker
-- npm
+### Backend
+1. `cd server`
+2. `npm install`
+3. Configure `.env` (copy from `.env.example`):
+   - `PORT`: Backend port (default: 3001)
+   - `CORS_ORIGIN`: URL of your frontend
+   - `PUBLIC_IP`: IP or domain for generated URLs
+4. `node index.js`
 
-## Setup & Running
+### Frontend
+1. `cd client`
+2. `npm install`
+3. Configure `.env` (copy from `.env.example`):
+   - `VITE_API_URL`: URL of your backend
+4. `npm run dev`
 
-### 1. Start the Backend
-1. Go to the `server/` directory.
-2. Run `npm install`.
-3. Start with `node index.js`.
-
-The backend runs on `http://localhost:3001`.
-
-### 2. Start the Frontend
-1. Go to the `client/` directory.
-2. Run `npm install`.
-3. Start with `npm run dev`.
-
-The dashboard runs on `http://localhost:5173`.
-
-## Deployment Workflow
-1. Open the dashboard.
-2. Enter a project name and select a ZIP file of your React app.
-3. Click "Deploy Now".
-4. Monitor the status and logs in real-time.
-5. Once running, click the provided link to access your live app.
-
-## Project Structure
-- `server/`: Express backend handling uploads, builds, and logs.
-- `client/`: Vue-based dashboard.
-- `uploads/`: Temporary storage for uploaded ZIPs.
-- `projects/`: Extracted project source code and Dockerfiles.
-- `deployments.json`: Simple persistence for project statuses.
+## Deployment
+Upload a ZIP of your React app (must contain `package.json` with `react` dependency). The platform will build it and serve it on a unique port.
