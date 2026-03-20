@@ -1,0 +1,1 @@
+{"name":"test","dependencies":{"react":"18"},"scripts":{"build":"mkdir -p dist && echo 'Hi' > dist/index.html"}}
