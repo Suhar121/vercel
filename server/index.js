@@ -40,37 +40,8 @@ function addLog(id, msg) {
     if (!logsMap.has(id)) logsMap.set(id, []);
     logsMap.get(id).push({ timestamp: new Date().toISOString(), message: msg.toString() });
 }
-function resolveProjectPath(projectPath) {
-    const rootPackagePath = path.join(projectPath, 'package.json');
-    if (fs.existsSync(rootPackagePath)) return projectPath;
 
-    const topLevelEntries = fs.readdirSync(projectPath, { withFileTypes: true });
-    if (topLevelEntries.length === 1 && topLevelEntries[0].isDirectory()) {
-        const nestedPath = path.join(projectPath, topLevelEntries[0].name);
-        if (fs.existsSync(path.join(nestedPath, 'package.json'))) return nestedPath;
-    }
-
-    throw new Error('Could not find package.json at the zip root');
-}
-function hasReactDependency(pkg) {
-    const dependencyGroups = [
-        pkg.dependencies,
-        pkg.devDependencies,
-        pkg.peerDependencies,
-        pkg.optionalDependencies
-    ];
-    return dependencyGroups.some(group => Boolean(group?.react));
-}
-function getNextAvailablePort(startPort = 4000) {
-    const usedPorts = new Set(
-        getDeployments()
-            .map(dep => Number(dep.port))
-            .filter(Number.isInteger)
-    );
-    let candidatePort = startPort;
-    while (usedPorts.has(candidatePort)) candidatePort += 1;
-    return candidatePort;
-}
+app.get('/health', (req, res) => res.json({ status: 'ok', port, corsOrigin, publicIp }));
 
 app.get('/deployments', (req, res) => res.json(getDeployments()));
 
@@ -81,20 +52,17 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     try {
         const zip = new admZip(req.file.path);
         zip.extractAllTo(projectPath, true);
-        const deployablePath = resolveProjectPath(projectPath);
-        const pkg = fs.readJsonSync(path.join(deployablePath, 'package.json'));
-        if (!hasReactDependency(pkg)) throw new Error('Not a React project');
+        const pkg = fs.readJsonSync(path.join(projectPath, 'package.json'));
+        if (!pkg.dependencies?.react) throw new Error('Not a React project');
 
         const deployments = getDeployments();
         deployments.push({ id, name: req.body.name || 'App', status: 'BUILDING', port: null, createdAt: new Date().toISOString() });
         saveDeployments(deployments);
-        buildAndRun(id, deployablePath);
+        buildAndRun(id, projectPath);
         res.json({ id });
     } catch (err) {
         if (fs.existsSync(projectPath)) fs.removeSync(projectPath);
         res.status(400).json({ error: err.message });
-    } finally {
-        if (req.file?.path && fs.existsSync(req.file.path)) fs.removeSync(req.file.path);
     }
 });
 
@@ -118,55 +86,15 @@ async function buildAndRun(id, projectPath) {
     addLog(id, 'Starting build...');
     const dockerfile = "FROM node:18-alpine\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nRUN npm run build\nRUN npm install -g serve\nCMD [\"sh\", \"-c\", \"if [ -d 'dist' ]; then serve -s dist -l 3000; else serve -s build -l 3000; fi\"]";
     fs.writeFileSync(path.join(projectPath, 'Dockerfile'), dockerfile);
-
-    let buildErrored = false;
-    let build;
-    try {
-        build = spawn('docker', ['build', '-t', `p-${id}`, '.'], { cwd: projectPath });
-    } catch (err) {
-        addLog(id, `Docker build failed to start: ${err.message}`);
-        updateStatus(id, 'FAILED');
-        return;
-    }
+    const build = spawn('docker', ['build', '-t', `p-${id}`, '.'], { cwd: projectPath });
     build.stdout.on('data', d => addLog(id, d));
     build.stderr.on('data', d => addLog(id, d));
-    build.on('error', err => {
-        buildErrored = true;
-        addLog(id, `Docker build failed to start: ${err.message}`);
-        updateStatus(id, 'FAILED');
-    });
     build.on('close', async code => {
-        if (buildErrored) return;
-        if (code !== 0) {
-            addLog(id, `Docker build exited with code ${code}`);
-            return updateStatus(id, 'FAILED');
-        }
-
-        const hostPort = getNextAvailablePort();
-        let runErrored = false;
-        let run;
-        try {
-            run = spawn('docker', ['run', '-d', '-p', `${hostPort}:3000`, '--name', `c-${id}`, `p-${id}`]);
-        } catch (err) {
-            addLog(id, `Docker run failed to start: ${err.message}`);
-            updateStatus(id, 'FAILED');
-            return;
-        }
-        run.stdout.on('data', d => addLog(id, d));
-        run.stderr.on('data', d => addLog(id, d));
-        run.on('error', err => {
-            runErrored = true;
-            addLog(id, `Docker run failed to start: ${err.message}`);
-            updateStatus(id, 'FAILED');
-        });
+        if (code !== 0) return updateStatus(id, 'FAILED');
+        const port = 4000 + getDeployments().length;
+        const run = spawn('docker', ['run', '-d', '-p', `${port}:3000`, '--name', `c-${id}`, `p-${id}`]);
         run.on('close', rcode => {
-            if (runErrored) return;
-            if (rcode === 0) {
-                updateStatus(id, 'RUNNING', { port: hostPort, url: `http://${publicIp}:${hostPort}` });
-            } else {
-                addLog(id, `Docker run exited with code ${rcode}`);
-                updateStatus(id, 'FAILED');
-            }
+            updateStatus(id, rcode === 0 ? 'RUNNING' : 'FAILED', { port, url: `http://${publicIp}:${port}` });
         });
     });
 }
